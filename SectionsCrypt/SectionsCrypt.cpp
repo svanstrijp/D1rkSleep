@@ -1,6 +1,5 @@
 #define _CRT_RAND_S
 #include <Windows.h>
-#include <stdio.h>
 
 #define NT_SUCCESS(Status) ((NTSTATUS)(Status) >= 0)
 #define NtCurrentThread() (  ( HANDLE ) ( LONG_PTR ) -2 )
@@ -30,14 +29,8 @@ VOID D1rkCrypt(DWORD SleepTime) {
 
     LPVOID relocBase = NULL;
     DWORD relocSize = 0;
-	//printf("[+] %s\t%p\t%d bytes\n", SECTION_HEADER->Name, txtSectionBase, txtSectionSize);
 
     for (int i = 0; i < NT_HEADER->FileHeader.NumberOfSections; i++) {
-        printf("[+] %s\t%p\t%d bytes\n", SECTION_HEADER->Name, 
-                                        (LPVOID)((DWORD64)ImageBase + (DWORD64)SECTION_HEADER->PointerToRawData), 
-                                        SECTION_HEADER->SizeOfRawData
-        );
-        
         if (!strcmp(".reloc", (const char*)SECTION_HEADER->Name)) {
             relocBase = (LPVOID)((DWORD64)ImageBase + (DWORD64)SECTION_HEADER->PointerToRawData);
             relocSize = SECTION_HEADER->SizeOfRawData;
@@ -65,7 +58,7 @@ VOID D1rkCrypt(DWORD SleepTime) {
 	CHAR KeyBuf[16];
 	unsigned int r = 0;
 	for (int i = 0; i < 16; i++) {
-		rand_s(&r); // r between UINT_MIN & UINT_MAX
+		rand_s(&r);
 		KeyBuf[i] = (CHAR)r;
 
 	}
@@ -92,11 +85,8 @@ VOID D1rkCrypt(DWORD SleepTime) {
 
     if (CreateTimerQueueTimer(&hNewTimer, hTimerQueue, (WAITORTIMERCALLBACK)RtlCaptureContext, &CtxThread, 0, 0, WT_EXECUTEINTIMERTHREAD))
     {
-        // sleeping , waiting  0x32 mili seconds for RtlCaptureContext function to finish
         WaitForSingleObject(hEvent, 0x32);
 
-        // we gonna populate the info from CtxThread into 6 different CONTEXT structs we ll be utilizing during the obfuscation
-        // each CONTEXT struct will hold info for the worker thread to execute specific function with specific params 
         memcpy(&RopProtRW, &CtxThread, sizeof(CONTEXT));
         memcpy(&RopMemEnc, &CtxThread, sizeof(CONTEXT));
         memcpy(&RopDelay, &CtxThread, sizeof(CONTEXT));
@@ -145,8 +135,6 @@ VOID D1rkCrypt(DWORD SleepTime) {
         RopSetEvt.Rip = (DWORD64)SetEvent;
         RopSetEvt.Rcx = (DWORD64)hEvent;
 
-        puts("\n[INFO] Queue timers\n");
-
 
         CreateTimerQueueTimer(&hNewTimer, hTimerQueue, (WAITORTIMERCALLBACK)NtContinue, &RopProtRW, 100, 0, WT_EXECUTEINTIMERTHREAD);
         CreateTimerQueueTimer(&hNewTimer, hTimerQueue, (WAITORTIMERCALLBACK)NtContinue, &RopMemEnc, 200, 0, WT_EXECUTEINTIMERTHREAD);
@@ -155,26 +143,28 @@ VOID D1rkCrypt(DWORD SleepTime) {
         CreateTimerQueueTimer(&hNewTimer, hTimerQueue, (WAITORTIMERCALLBACK)NtContinue, &RopProtRX, 500, 0, WT_EXECUTEINTIMERTHREAD);
         CreateTimerQueueTimer(&hNewTimer, hTimerQueue, (WAITORTIMERCALLBACK)NtContinue, &RopSetEvt, 600, 0, WT_EXECUTEINTIMERTHREAD);
 
-        puts("\n[INFO] Wait for hEvent\n");
-        // once setup we go to sleep and wait SentEvent() function to inform us that everything has been completed
         WaitForSingleObject(hEvent, INFINITE);
-
-        puts("\n[INFO] Finished waiting for event\n");
     }
-    // delete the timerQueue
     DeleteTimerQueue(hTimerQueue);
 }
 
 
-int main() {
-	
-    do {
-        printf("\n\n================\t\tStart\t\t================\n\n");
-        D1rkCrypt(20000);
-        printf("\n[+] Only Section are Encrypted (.text, .rdata, .data, .pdata, .rsrc, .reloc)\n");
-        printf("\n\n================\t\tRepeate\t\t================\n\n");
-    } while (TRUE);
+extern "C" __declspec(dllexport) VOID WINAPI D1rkSleep(DWORD dwMilliseconds)
+{
+    if (dwMilliseconds == 0) return;
+    D1rkCrypt(dwMilliseconds);
+}
 
-	return 0;
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
+{
+    switch (ul_reason_for_call)
+    {
+    case DLL_PROCESS_ATTACH:
+        DisableThreadLibraryCalls(hModule);
+        break;
+    case DLL_PROCESS_DETACH:
+        break;
+    }
+    return TRUE;
 }
 
