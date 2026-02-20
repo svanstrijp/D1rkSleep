@@ -142,6 +142,7 @@
     <ClCompile Include="SectionsCrypt.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include=".gitignore" />
     <None Include="SectionsCrypt\fix_vcxproj.ps1" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
